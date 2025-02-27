@@ -1,0 +1,1 @@
+# tablescout-checker
