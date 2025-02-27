@@ -13,9 +13,8 @@ def check_cru_availability(guests=2):
     }
     
     with sync_playwright() as p:
-        # Launch browser in headless mode with required arguments for CI
         browser = p.chromium.launch(
-            headless=True,  # Must be headless for CI
+            headless=True,
             args=['--no-sandbox', '--disable-setuid-sandbox']
         )
         context = browser.new_context(
@@ -26,73 +25,68 @@ def check_cru_availability(guests=2):
         
         try:
             print("Starting availability check...")
-            # Set extra headers to look more like a real browser
-            page.set_extra_http_headers({
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.9,nb;q=0.8',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Connection': 'keep-alive',
-                'Cache-Control': 'max-age=0',
-                'Sec-Fetch-Dest': 'document',
-                'Sec-Fetch-Mode': 'navigate',
-                'Sec-Fetch-Site': 'none',
-                'Sec-Fetch-User': '?1',
-                'Upgrade-Insecure-Requests': '1'
-            })
-            
-            # Try to navigate directly to the booking page
-            print("Navigating to booking page...")
-            page.goto('https://cru.superbexperience.com/booking', wait_until='networkidle')
+            # Navigate to the page
+            page.goto('https://cru.superbexperience.com/', wait_until='networkidle')
             page.wait_for_load_state('networkidle')
             time.sleep(2)
-            page.screenshot(path="results/1_initial_page.png")
+            page.screenshot(path="results/1_before_cookies.png")
             
-            print("Current URL:", page.url)
-            print("Page content length:", len(page.content()))
-            
-            # Wait for and click a la carte option if needed
-            if page.is_visible('text=A La carte'):
-                print("Clicking A La Carte...")
-                page.click('text=A La carte')
+            # Handle cookie consent
+            print("Looking for cookie consent...")
+            if page.is_visible('button:has-text("ACCEPT")'):
+                print("Accepting cookies...")
+                page.click('button:has-text("ACCEPT")')
                 page.wait_for_load_state('networkidle')
                 time.sleep(2)
-                page.screenshot(path="results/2_after_alacarte.png")
+                page.screenshot(path="results/2_after_cookies.png")
+            else:
+                print("No cookie consent found")
             
-            # Select number of guests if the selector is visible
-            if page.is_visible('text=Number of guests'):
-                print(f"Selecting {guests} guests...")
-                for _ in range(guests-1):
-                    page.click('button:has-text("+")')
-                    time.sleep(0.5)
-                page.wait_for_load_state('networkidle')
-                page.screenshot(path="results/3_after_guests.png")
-                
-                # Click continue
-                if page.is_visible('button:has-text("Continue")'):
-                    page.click('button:has-text("Continue")')
-                    page.wait_for_load_state('networkidle')
-                    time.sleep(2)
-                    page.screenshot(path="results/4_after_continue.png")
+            # Wait for and click a la carte option
+            print("Waiting for A La Carte option...")
+            page.wait_for_selector('text=A La carte', timeout=30000)
+            print("Clicking A La Carte...")
+            page.click('text=A La carte')
+            page.wait_for_load_state('networkidle')
+            time.sleep(2)
+            page.screenshot(path="results/3_after_alacarte.png")
             
-            # Check if we can find the calendar
-            if page.is_visible('[data-testid="date-picker-day"]'):
-                print("Calendar found, checking dates...")
-                page.screenshot(path="results/5_calendar_visible.png")
-                
-                # Get all dates
+            # Select number of guests
+            print(f"Selecting {guests} guests...")
+            page.wait_for_selector('text=Number of guests', timeout=30000)
+            for _ in range(guests-1):
+                page.click('button:has-text("+")')
+                time.sleep(0.5)
+            page.wait_for_load_state('networkidle')
+            page.screenshot(path="results/4_after_guests.png")
+            
+            # Click continue
+            print("Clicking continue...")
+            page.click('button:has-text("Continue")')
+            page.wait_for_load_state('networkidle')
+            time.sleep(2)
+            page.screenshot(path="results/5_after_continue.png")
+            
+            # Wait for calendar
+            print("Waiting for calendar...")
+            page.wait_for_selector('[data-testid="date-picker-day"]', timeout=30000)
+            page.screenshot(path="results/6_calendar_visible.png")
+            
+            # Check dates for current and next month
+            for month in range(2):
+                print(f"Checking month {month + 1}")
                 dates = page.query_selector_all('button[data-testid="date-picker-day"]')
-                print(f"Found {len(dates)} date elements")
+                print(f"Found {len(dates)} dates")
                 
                 for date in dates:
                     try:
                         date_text = date.get_attribute('aria-label')
                         disabled = date.get_attribute('disabled')
-                        print(f"Date: {date_text}, Disabled: {disabled}")
+                        print(f"Checking date: {date_text}, disabled: {disabled}")
                         
                         if not date_text or disabled is not None:
                             continue
                         
-                        print(f"Checking {date_text}...")
                         date.click()
                         page.wait_for_load_state('networkidle')
                         time.sleep(1)
@@ -109,9 +103,17 @@ def check_cru_availability(guests=2):
                     except Exception as e:
                         print(f"Error checking date {date_text}: {str(e)}")
                         continue
-            else:
-                print("Calendar not found!")
-                page.screenshot(path="results/error_no_calendar.png")
+                
+                if month == 0:
+                    next_month = page.query_selector('button[aria-label="Next month"]')
+                    if next_month:
+                        print("Moving to next month")
+                        next_month.click()
+                        page.wait_for_load_state('networkidle')
+                        time.sleep(2)
+                        page.screenshot(path=f"results/7_next_month.png")
+                    else:
+                        print("No next month button found")
             
         except Exception as e:
             print(f"Error during check: {str(e)}")
