@@ -13,9 +13,10 @@ def check_cru_availability(guests=2):
     }
     
     with sync_playwright() as p:
-        # Use more browser-like settings
+        # Launch browser in headless mode with required arguments for CI
         browser = p.chromium.launch(
-            headless=False,  # Try with visible browser first
+            headless=True,  # Must be headless for CI
+            args=['--no-sandbox', '--disable-setuid-sandbox']
         )
         context = browser.new_context(
             user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
@@ -25,45 +26,95 @@ def check_cru_availability(guests=2):
         
         try:
             print("Starting availability check...")
-            # Navigate with extra headers
+            # Set extra headers to look more like a real browser
             page.set_extra_http_headers({
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Language': 'en-US,en;q=0.9,nb;q=0.8',
                 'Accept-Encoding': 'gzip, deflate, br',
                 'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1',
+                'Cache-Control': 'max-age=0',
                 'Sec-Fetch-Dest': 'document',
                 'Sec-Fetch-Mode': 'navigate',
                 'Sec-Fetch-Site': 'none',
                 'Sec-Fetch-User': '?1',
+                'Upgrade-Insecure-Requests': '1'
             })
             
-            # Navigate to Cru's booking page
-            page.goto('https://cru.superbexperience.com/', wait_until='networkidle')
+            # Try to navigate directly to the booking page
+            print("Navigating to booking page...")
+            page.goto('https://cru.superbexperience.com/booking', wait_until='networkidle')
             page.wait_for_load_state('networkidle')
-            time.sleep(5)  # Give it extra time
+            time.sleep(2)
             page.screenshot(path="results/1_initial_page.png")
             
-            # Rest of the code remains the same...
-            print("Page title:", page.title())
             print("Current URL:", page.url)
+            print("Page content length:", len(page.content()))
             
-            if "403" in page.url or "forbidden" in page.url.lower():
-                print("Got blocked with 403 - trying alternative approach...")
-                # Try mobile user agent
-                context.close()
-                context = browser.new_context(
-                    user_agent='Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
-                    viewport={'width': 375, 'height': 812},
-                )
-                page = context.new_page()
-                page.goto('https://cru.superbexperience.com/', wait_until='networkidle')
+            # Wait for and click a la carte option if needed
+            if page.is_visible('text=A La carte'):
+                print("Clicking A La Carte...")
+                page.click('text=A La carte')
                 page.wait_for_load_state('networkidle')
-                time.sleep(5)
-                page.screenshot(path="results/1_initial_page_mobile.png")
+                time.sleep(2)
+                page.screenshot(path="results/2_after_alacarte.png")
+            
+            # Select number of guests if the selector is visible
+            if page.is_visible('text=Number of guests'):
+                print(f"Selecting {guests} guests...")
+                for _ in range(guests-1):
+                    page.click('button:has-text("+")')
+                    time.sleep(0.5)
+                page.wait_for_load_state('networkidle')
+                page.screenshot(path="results/3_after_guests.png")
+                
+                # Click continue
+                if page.is_visible('button:has-text("Continue")'):
+                    page.click('button:has-text("Continue")')
+                    page.wait_for_load_state('networkidle')
+                    time.sleep(2)
+                    page.screenshot(path="results/4_after_continue.png")
+            
+            # Check if we can find the calendar
+            if page.is_visible('[data-testid="date-picker-day"]'):
+                print("Calendar found, checking dates...")
+                page.screenshot(path="results/5_calendar_visible.png")
+                
+                # Get all dates
+                dates = page.query_selector_all('button[data-testid="date-picker-day"]')
+                print(f"Found {len(dates)} date elements")
+                
+                for date in dates:
+                    try:
+                        date_text = date.get_attribute('aria-label')
+                        disabled = date.get_attribute('disabled')
+                        print(f"Date: {date_text}, Disabled: {disabled}")
+                        
+                        if not date_text or disabled is not None:
+                            continue
+                        
+                        print(f"Checking {date_text}...")
+                        date.click()
+                        page.wait_for_load_state('networkidle')
+                        time.sleep(1)
+                        
+                        time_slots = page.query_selector_all('button:has-text(":")')
+                        times = [slot.inner_text() for slot in time_slots]
+                        
+                        if times:
+                            print(f"Found times for {date_text}: {times}")
+                            results['available_dates'].append({
+                                'date': date_text,
+                                'times': times
+                            })
+                    except Exception as e:
+                        print(f"Error checking date {date_text}: {str(e)}")
+                        continue
+            else:
+                print("Calendar not found!")
+                page.screenshot(path="results/error_no_calendar.png")
             
         except Exception as e:
-            print(f"Error checking availability: {str(e)}")
+            print(f"Error during check: {str(e)}")
             page.screenshot(path="results/error_state.png")
         finally:
             browser.close()
@@ -72,17 +123,22 @@ def check_cru_availability(guests=2):
 
 def save_results(results):
     """Save results to a JSON file"""
-    # Create results directory if it doesn't exist
     os.makedirs('results', exist_ok=True)
     
-    # Save to timestamped file
     filename = f"results/availability_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     with open(filename, 'w') as f:
         json.dump(results, f, indent=2)
     
-    # Also save to latest file
     with open('results/latest.json', 'w') as f:
         json.dump(results, f, indent=2)
+    
+    print(f"\nResults saved:")
+    print(f"Found {len(results['available_dates'])} dates with availability")
+    if results['available_dates']:
+        print("\nAvailable dates:")
+        for date_info in results['available_dates']:
+            print(f"\n{date_info['date']}:")
+            print(f"Times: {', '.join(date_info['times'])}")
 
 def main():
     results = check_cru_availability(guests=2)
