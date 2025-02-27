@@ -42,6 +42,31 @@ def check_cru_availability(guests=2):
             else:
                 print("No cookie consent found")
             
+            # Click "Reserve your table" button
+            print("Looking for 'Reserve your table' button...")
+            reserve_button_selectors = [
+                'button:has-text("Reserve your table")',
+                'button:has-text("RESERVE YOUR TABLE")',
+                'a:has-text("Reserve your table")',
+                'a:has-text("RESERVE YOUR TABLE")'
+            ]
+            
+            for selector in reserve_button_selectors:
+                if page.is_visible(selector):
+                    print(f"Found and clicking reserve button with selector: {selector}")
+                    page.click(selector)
+                    page.wait_for_load_state('networkidle')
+                    time.sleep(2)
+                    page.screenshot(path="results/3_after_reserve.png")
+                    break
+            else:
+                print("Reserve button not found with common selectors, trying to locate it...")
+                # Print all button texts for debugging
+                buttons = page.query_selector_all('button, a')
+                print("Available buttons/links:")
+                for button in buttons:
+                    print(f"Text: '{button.inner_text()}', Tag: {button.evaluate('el => el.tagName')}")
+            
             # Wait for and click a la carte option
             print("Waiting for A La Carte option...")
             page.wait_for_selector('text=A La carte', timeout=30000)
@@ -49,7 +74,7 @@ def check_cru_availability(guests=2):
             page.click('text=A La carte')
             page.wait_for_load_state('networkidle')
             time.sleep(2)
-            page.screenshot(path="results/3_after_alacarte.png")
+            page.screenshot(path="results/4_after_alacarte.png")
             
             # Select number of guests
             print(f"Selecting {guests} guests...")
@@ -58,19 +83,19 @@ def check_cru_availability(guests=2):
                 page.click('button:has-text("+")')
                 time.sleep(0.5)
             page.wait_for_load_state('networkidle')
-            page.screenshot(path="results/4_after_guests.png")
+            page.screenshot(path="results/5_after_guests.png")
             
             # Click continue
             print("Clicking continue...")
             page.click('button:has-text("Continue")')
             page.wait_for_load_state('networkidle')
             time.sleep(2)
-            page.screenshot(path="results/5_after_continue.png")
+            page.screenshot(path="results/6_after_continue.png")
             
             # Wait for calendar
             print("Waiting for calendar...")
             page.wait_for_selector('[data-testid="date-picker-day"]', timeout=30000)
-            page.screenshot(path="results/6_calendar_visible.png")
+            page.screenshot(path="results/7_calendar_visible.png")
             
             # Check dates for current and next month
             for month in range(2):
@@ -111,7 +136,7 @@ def check_cru_availability(guests=2):
                         next_month.click()
                         page.wait_for_load_state('networkidle')
                         time.sleep(2)
-                        page.screenshot(path=f"results/7_next_month.png")
+                        page.screenshot(path=f"results/8_next_month.png")
                     else:
                         print("No next month button found")
             
